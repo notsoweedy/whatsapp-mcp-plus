@@ -5,6 +5,7 @@ import { getCachedMessage } from "../../whatsapp/msgcache.ts";
 import { sendText, sendMediaFile, sendVoiceNote } from "../../whatsapp/actions.ts";
 import { guardedSend, scanForInjection } from "../../safety/index.ts";
 import { jsonResult, safeHandler } from "../format.ts";
+import { SEND_REMOTE } from "../annotations.ts";
 
 /** Turn a bare phone number into a WhatsApp user JID; pass JIDs through. */
 export function normalizeRecipient(recipient: string): string {
@@ -26,6 +27,7 @@ export function registerSendTools(server: McpServer): void {
       reply_to_message_id: z.string().optional().describe("Quote/reply to this message id (must be recent)"),
       confirm_token: z.string().optional().describe("Token returned by a prior staged send, to confirm it"),
     },
+    { ...SEND_REMOTE, title: "Send message" },
     safeHandler(async ({ recipient, text, reply_to_message_id, confirm_token }: any) => {
       const jid = normalizeRecipient(recipient);
       const quoted = reply_to_message_id ? getCachedMessage(reply_to_message_id) : undefined;
@@ -54,6 +56,7 @@ export function registerSendTools(server: McpServer): void {
       caption: z.string().optional(),
       confirm_token: z.string().optional(),
     },
+    { ...SEND_REMOTE, title: "Send file" },
     safeHandler(async ({ recipient, file_path, caption, confirm_token }: any) => {
       const jid = normalizeRecipient(recipient);
       const outcome = await guardedSend({
@@ -74,6 +77,7 @@ export function registerSendTools(server: McpServer): void {
       file_path: z.string().describe("Path to an audio file (.ogg/opus renders as a true voice note)"),
       confirm_token: z.string().optional(),
     },
+    { ...SEND_REMOTE, title: "Send voice note" },
     safeHandler(async ({ recipient, file_path, confirm_token }: any) => {
       const jid = normalizeRecipient(recipient);
       const outcome = await guardedSend({

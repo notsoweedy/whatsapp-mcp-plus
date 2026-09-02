@@ -84,11 +84,19 @@ export async function transcribeVoiceMessage(
     };
   }
 
-  const cmd = config.transcriptionCmd.replace("{input}", audioPath);
-  const parts = cmd.split(" ").filter(Boolean);
+  // The command template is operator-configured (WAMCP_TRANSCRIPTION_CMD, read
+  // from the server's OWN environment) and is never derived from message content,
+  // so this is not a prompt-injection surface. It is still hardened two ways:
+  //   1. shell:false (the spawnSync default, set explicitly here) — no shell ever
+  //      parses the string, so metacharacters cannot chain or redirect commands.
+  //   2. The TEMPLATE is split into argv parts BEFORE {input} is substituted, so
+  //      the audio path is always a single argument even when it contains spaces
+  //      (e.g. a data dir under "C:\Users\John Doe\..."). Substituting first and
+  //      splitting after would break such paths into multiple bogus arguments.
+  const parts = config.transcriptionCmd.split(" ").filter(Boolean);
   const bin = parts[0]!;
-  const args = parts.slice(1);
-  const res = spawnSync(bin, args, { encoding: "utf-8", timeout: 120_000 });
+  const args = parts.slice(1).map((p) => p.replaceAll("{input}", audioPath));
+  const res = spawnSync(bin, args, { encoding: "utf-8", timeout: 120_000, shell: false });
   if (res.status !== 0) {
     throw new Error(`Transcription command failed: ${res.stderr || res.error?.message || "unknown"}`);
   }

@@ -14,11 +14,13 @@ import {
 } from "../../db.ts";
 import { formatDbMessageForJson, formatDbChatForJson, jsonResult, textResult, safeHandler } from "../format.ts";
 import { annotateForInjection } from "../../safety/index.ts";
+import { READ_LOCAL } from "../annotations.ts";
 
 export function registerReadTools(server: McpServer): void {
   server.tool(
     "search_contacts",
     { query: z.string().min(1).describe("Name or phone-number fragment to search for") },
+    { ...READ_LOCAL, title: "Search contacts" },
     safeHandler(async ({ query }: { query: string }) => {
       return jsonResult(searchDbForContacts(query));
     }),
@@ -32,6 +34,7 @@ export function registerReadTools(server: McpServer): void {
       page: z.number().int().min(0).default(0),
       sort_by: z.enum(["last_active", "name"]).default("last_active"),
     },
+    { ...READ_LOCAL, title: "List chats" },
     safeHandler(async ({ query, limit, page, sort_by }: any) => {
       const chats = getChats(limit, page, sort_by, query, true);
       return jsonResult(chats.map(formatDbChatForJson));
@@ -44,6 +47,7 @@ export function registerReadTools(server: McpServer): void {
       chat_jid: z.string().describe("The JID of the chat, e.g. 12345@s.whatsapp.net or ...@g.us"),
       include_last_message: z.boolean().default(true),
     },
+    { ...READ_LOCAL, title: "Get chat" },
     safeHandler(async ({ chat_jid, include_last_message }: any) => {
       const chat = getChat(chat_jid, include_last_message);
       return jsonResult(chat ? formatDbChatForJson(chat) : null);
@@ -59,6 +63,7 @@ export function registerReadTools(server: McpServer): void {
       after: z.string().optional().describe("ISO timestamp; only messages at/after this time"),
       before: z.string().optional().describe("ISO timestamp; only messages at/before this time"),
     },
+    { ...READ_LOCAL, title: "List messages" },
     safeHandler(async ({ chat_jid, limit, page, after, before }: any) => {
       const messages = getMessages(chat_jid, limit, page, { after, before });
       const formatted = messages.map(formatDbMessageForJson);
@@ -70,6 +75,7 @@ export function registerReadTools(server: McpServer): void {
   server.tool(
     "get_last_interaction",
     { chat_jid: z.string().describe("Chat JID to fetch the most recent message from") },
+    { ...READ_LOCAL, title: "Get last interaction" },
     safeHandler(async ({ chat_jid }: any) => {
       const msg = getLastInteraction(chat_jid);
       if (!msg) return jsonResult(null);
@@ -81,6 +87,7 @@ export function registerReadTools(server: McpServer): void {
   server.tool(
     "contact_info",
     { jid: z.string().describe("Contact or chat JID") },
+    { ...READ_LOCAL, title: "Contact info" },
     safeHandler(async ({ jid }: any) => {
       const info = getContactInfo(jid);
       return jsonResult({
@@ -93,6 +100,7 @@ export function registerReadTools(server: McpServer): void {
   server.tool(
     "chat_stats",
     { chat_jid: z.string().describe("Chat JID to compute statistics for") },
+    { ...READ_LOCAL, title: "Chat statistics" },
     safeHandler(async ({ chat_jid }: any) => {
       const s = computeChatStats(chat_jid);
       return jsonResult({
@@ -110,6 +118,7 @@ export function registerReadTools(server: McpServer): void {
       format: z.enum(["markdown", "text"]).default("markdown"),
       limit: z.number().int().positive().max(20000).default(5000),
     },
+    { ...READ_LOCAL, title: "Export chat" },
     safeHandler(async ({ chat_jid, format, limit }: any) => {
       return textResult(exportChat(chat_jid, format, limit));
     }),
@@ -122,6 +131,7 @@ export function registerReadTools(server: McpServer): void {
       before: z.number().int().min(0).max(50).default(5),
       after: z.number().int().min(0).max(50).default(5),
     },
+    { ...READ_LOCAL, title: "Message context" },
     safeHandler(async ({ message_id, before, after }: any) => {
       const ctx = getMessagesAround(message_id, before, after);
       const all = [...ctx.before, ...(ctx.target ? [ctx.target] : []), ...ctx.after];
@@ -143,6 +153,7 @@ export function registerReadTools(server: McpServer): void {
       limit: z.number().int().positive().max(100).default(10),
       page: z.number().int().min(0).default(0),
     },
+    { ...READ_LOCAL, title: "Search messages" },
     safeHandler(async ({ query, chat_jid, limit, page }: any) => {
       const messages = searchMessages(query, chat_jid ?? null, limit, page);
       const injection = annotateForInjection(messages.map((m) => m.content));

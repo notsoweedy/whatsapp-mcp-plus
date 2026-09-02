@@ -1,11 +1,35 @@
 # HANDOFF — whatsapp-mcp-plus
 
-Last updated: 2026-08-20 (live end-to-end test + privacy work session)
+Last updated: 2026-09-03 (M8ven audit fixes: tool annotations + hardening)
 
 ## What this is
 A secure, zero-setup WhatsApp MCP server in TypeScript on Baileys. Maintained
 successor to the abandoned `lharries/whatsapp-mcp` (6.1k stars). Goal: stars.
 Strategy in `BUILD_PLAN.md`; launch plan in `LAUNCH.md`.
+
+## Session 2026-09-03 — M8ven (Glama) audit fixes (UNCOMMITTED in working tree)
+Addressed the quality suggestions from the M8ven MCP audit
+(m8ven.ai/mcp/eeshsaxena-whatsapp-mcp-plus-1eb1ks). `npm test`, `npm run lint`,
+`npm run typecheck` all green after the changes.
+- **Tool annotations (was 0/52) — DONE.** All 52 tools now declare the four MCP
+  behaviour hints + a `title`, via documented presets in `src/mcp/annotations.ts`
+  (READ_LOCAL / READ_REMOTE / WRITE_LOCAL / SEND_REMOTE / UPDATE_REMOTE /
+  DESTRUCTIVE_REMOTE / FETCH_REMOTE, plus one inline for confirm_action). Passed
+  as the 3rd arg to `server.tool(name, schema, annotations, cb)`; the withScopeGate
+  wrapper in server.ts is arg-count-agnostic so it needed no change.
+- **Tool test coverage (was 9/52) — DONE.** New `test/annotations-test.mjs`
+  (wired into `npm test` as `test:annotations`) boots the server (WAMCP_NO_WA=1),
+  lists tools, and asserts the exact 52-tool inventory + every tool's four hints
+  match an EXPECTED table. Every tool is named as a literal, so it doubles as the
+  per-tool coverage anchor and a regression guard on the hint values.
+- **Shell-out finding (media.ts) — HARDENED.** `transcribeVoiceMessage` now splits
+  the WAMCP_TRANSCRIPTION_CMD template into argv BEFORE substituting `{input}`
+  (fixes paths with spaces) and passes `shell:false` explicitly. It was never an
+  injection surface (template is operator env, not message-derived); comment says so.
+- **Dependency freshness (qrcode-terminal 0.12.0) — NO ACTION.** 0.12.0 is the
+  latest published version (last release 2022); nothing newer exists to bump to.
+- Removed stray empty `err.txt` (git rm) and added it to `.gitignore`.
+- NOTE: not yet committed/pushed — awaiting his go-ahead (+ his no-AI-line pref).
 
 ## Current state: LIVE-TESTED END TO END. SECURITY-HARDENED. PUSHED. Near launch.
 - `origin/main` @ **f43e2e5** (repo: github.com/eeshsaxena/whatsapp-mcp-plus).

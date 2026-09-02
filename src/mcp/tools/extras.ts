@@ -6,11 +6,13 @@ import { sendLocation, sendPoll, sendContactCard } from "../../whatsapp/actions.
 import { guardedSend } from "../../safety/index.ts";
 import { formatDbChatForJson, jsonResult, safeHandler } from "../format.ts";
 import { normalizeRecipient } from "./send.ts";
+import { READ_LOCAL, SEND_REMOTE } from "../annotations.ts";
 
 export function registerExtraTools(server: McpServer): void {
   server.tool(
     "list_groups",
     { limit: z.number().int().positive().max(200).default(50), page: z.number().int().min(0).default(0) },
+    { ...READ_LOCAL, title: "List groups" },
     safeHandler(async ({ limit, page }: any) => {
       return jsonResult(getGroupChats(limit, page).map(formatDbChatForJson));
     }),
@@ -26,6 +28,7 @@ export function registerExtraTools(server: McpServer): void {
       address: z.string().optional(),
       confirm_token: z.string().optional(),
     },
+    { ...SEND_REMOTE, title: "Send location" },
     safeHandler(async ({ recipient, latitude, longitude, name, address, confirm_token }: any) => {
       const jid = normalizeRecipient(recipient);
       const outcome = await guardedSend({
@@ -48,6 +51,7 @@ export function registerExtraTools(server: McpServer): void {
       selectable_count: z.number().int().min(1).default(1),
       confirm_token: z.string().optional(),
     },
+    { ...SEND_REMOTE, title: "Send poll" },
     safeHandler(async ({ recipient, question, options, selectable_count, confirm_token }: any) => {
       const jid = normalizeRecipient(recipient);
       const outcome = await guardedSend({
@@ -69,6 +73,7 @@ export function registerExtraTools(server: McpServer): void {
       contact_phone: z.string().min(1),
       confirm_token: z.string().optional(),
     },
+    { ...SEND_REMOTE, title: "Send contact" },
     safeHandler(async ({ recipient, contact_name, contact_phone, confirm_token }: any) => {
       const jid = normalizeRecipient(recipient);
       const outcome = await guardedSend({

@@ -5,6 +5,7 @@ import { sendPresence } from "../../whatsapp/actions.ts";
 import { assertMutationsAllowed } from "../../safety/index.ts";
 import { textResult, safeHandler } from "../format.ts";
 import { normalizeRecipient } from "./send.ts";
+import { UPDATE_REMOTE } from "../annotations.ts";
 
 export function registerPresenceTools(server: McpServer): void {
   server.tool(
@@ -13,6 +14,7 @@ export function registerPresenceTools(server: McpServer): void {
       recipient: z.string().describe("Phone number or chat JID"),
       state: z.enum(["available", "unavailable", "composing", "recording", "paused"]),
     },
+    { ...UPDATE_REMOTE, title: "Send presence" },
     safeHandler(async ({ recipient, state }: any) => {
       assertMutationsAllowed("send_presence");
       const jid = normalizeRecipient(recipient);

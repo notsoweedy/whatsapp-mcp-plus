@@ -5,7 +5,7 @@
 First release. A secure, zero-setup WhatsApp MCP server in TypeScript on Baileys,
 a maintained successor to the abandoned `lharries/whatsapp-mcp`.
 
-**Tools (51):**
+**Tools (52):**
 - Read: search_contacts, list_chats, list_groups, get_chat, list_messages
   (date range), get_last_interaction, contact_info, get_message_context,
   search_messages
@@ -68,6 +68,23 @@ government IDs, bank codes, API keys, OTP codes) are redacted.
   CONTACTS` / `WAMCP_ALLOWLIST_INBOUND` (default off) restore the looser behavior.
 - No unhandled rejection from the Baileys call-timeout race (was a possible crash).
 - Added `test/harden-test.mjs` (37 checks) covering the above.
+
+**MCP tool annotations (host interoperability):** every one of the 52 tools now
+declares all four behaviour hints (`readOnlyHint`, `destructiveHint`,
+`idempotentHint`, `openWorldHint`) plus a human-readable `title`, so hosts can
+decide before a call whether it needs user confirmation and OpenAI's tool
+directory accepts them (it rejects tools missing any hint). Hints are grouped
+into documented presets in `src/mcp/annotations.ts`; a new `test:annotations`
+suite boots the server, lists all tools, and asserts each one's hints match its
+documented behaviour (also serving as per-tool coverage — a new tool without an
+entry fails the suite). The hints are advisory only; the server's own safety
+rails (scopes/modes/confirm/rate-limits) still enforce policy regardless.
+
+**Transcription hardening:** the pluggable `WAMCP_TRANSCRIPTION_CMD` (voice STT)
+now splits the command template into argv parts *before* substituting `{input}`
+and runs with `shell:false`, so an audio path containing spaces (e.g. a data dir
+under `C:\Users\John Doe\...`) stays a single argument and no shell ever parses
+the string. The template is operator-configured, never derived from messages.
 
 **Performance:** history sync batches each chunk into a single transaction and
 reuses cached prepared statements — ~28x faster bulk message inserts (10k rows:

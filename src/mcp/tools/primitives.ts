@@ -15,6 +15,7 @@ import {
 import { assertMutationsAllowed, guardedSend, guardedMutation } from "../../safety/index.ts";
 import { textResult, jsonResult, safeHandler, errorResult } from "../format.ts";
 import { normalizeRecipient } from "./send.ts";
+import { UPDATE_REMOTE, SEND_REMOTE, DESTRUCTIVE_REMOTE } from "../annotations.ts";
 
 function keyForMessage(messageId: string) {
   const row = getMessageById(messageId);
@@ -34,6 +35,7 @@ export function registerPrimitiveTools(server: McpServer): void {
       message_id: z.string(),
       emoji: z.string().max(8).describe("Emoji to react with; empty string ('') removes the reaction"),
     },
+    { ...UPDATE_REMOTE, title: "React to message" },
     safeHandler(async ({ message_id, emoji }: any) => {
       assertMutationsAllowed("react_to_message");
       const key = keyForMessage(message_id);
@@ -49,6 +51,7 @@ export function registerPrimitiveTools(server: McpServer): void {
       message_id: z.string().describe("Id of one of YOUR sent messages to edit"),
       new_text: z.string().min(1),
     },
+    { ...UPDATE_REMOTE, title: "Edit message" },
     safeHandler(async ({ message_id, new_text }: any) => {
       assertMutationsAllowed("edit_message");
       const row = getMessageById(message_id);
@@ -66,6 +69,7 @@ export function registerPrimitiveTools(server: McpServer): void {
       message_id: z.string().describe("Delete for everyone; only works for your own recent messages"),
       confirm_token: z.string().optional().describe("Token from a prior staged delete, to confirm it"),
     },
+    { ...DESTRUCTIVE_REMOTE, title: "Delete message" },
     safeHandler(async ({ message_id, confirm_token }: any) => {
       const row = getMessageById(message_id);
       if (!row) return errorResult(`Unknown message id ${message_id}`);
@@ -88,6 +92,7 @@ export function registerPrimitiveTools(server: McpServer): void {
     {
       message_ids: z.array(z.string()).min(1).describe("Message ids to mark as read"),
     },
+    { ...UPDATE_REMOTE, title: "Mark as read" },
     safeHandler(async ({ message_ids }: any) => {
       assertMutationsAllowed("mark_read");
       const keys = message_ids.map(keyForMessage).filter(Boolean) as any[];
@@ -104,6 +109,7 @@ export function registerPrimitiveTools(server: McpServer): void {
       recipient: z.string().describe("Phone number or chat JID to forward to"),
       confirm_token: z.string().optional(),
     },
+    { ...SEND_REMOTE, title: "Forward message" },
     safeHandler(async ({ message_id, recipient, confirm_token }: any) => {
       const row = getMessageById(message_id);
       if (!row) return errorResult(`Unknown message id ${message_id}`);

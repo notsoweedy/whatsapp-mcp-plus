@@ -15,11 +15,13 @@ import {
 import { assertMutationsAllowed, guardedMutation } from "../../safety/index.ts";
 import { jsonResult, textResult, safeHandler, errorResult } from "../format.ts";
 import { normalizeRecipient } from "./send.ts";
+import { READ_REMOTE, UPDATE_REMOTE, DESTRUCTIVE_REMOTE } from "../annotations.ts";
 
 export function registerChatTools(server: McpServer): void {
   server.tool(
     "check_number_on_whatsapp",
     { numbers: z.array(z.string()).min(1).describe("Phone numbers (with country code) to check") },
+    { ...READ_REMOTE, title: "Check number on WhatsApp" },
     safeHandler(async ({ numbers }: any) => {
       const res = await checkOnWhatsApp(getSock(), numbers);
       return jsonResult(res);
@@ -29,6 +31,7 @@ export function registerChatTools(server: McpServer): void {
   server.tool(
     "get_profile_picture",
     { jid: z.string().describe("Contact or group JID") },
+    { ...READ_REMOTE, title: "Get profile picture" },
     safeHandler(async ({ jid }: any) => {
       const url = await getProfilePicture(getSock(), normalizeRecipient(jid));
       return jsonResult({ url });
@@ -38,6 +41,7 @@ export function registerChatTools(server: McpServer): void {
   server.tool(
     "pin_chat",
     { chat_jid: z.string(), pinned: z.boolean().default(true) },
+    { ...UPDATE_REMOTE, title: "Pin chat" },
     safeHandler(async ({ chat_jid, pinned }: any) => {
       assertMutationsAllowed("pin_chat");
       await pinChat(getSock(), chat_jid, pinned);
@@ -51,6 +55,7 @@ export function registerChatTools(server: McpServer): void {
       chat_jid: z.string(),
       duration_hours: z.number().min(0).default(8).describe("Mute duration in hours; 0 unmutes"),
     },
+    { ...UPDATE_REMOTE, title: "Mute chat" },
     safeHandler(async ({ chat_jid, duration_hours }: any) => {
       assertMutationsAllowed("mute_chat");
       const ms = duration_hours > 0 ? Math.round(duration_hours * 3600_000) : null;
@@ -62,6 +67,7 @@ export function registerChatTools(server: McpServer): void {
   server.tool(
     "star_message",
     { message_id: z.string(), star: z.boolean().default(true) },
+    { ...UPDATE_REMOTE, title: "Star message" },
     safeHandler(async ({ message_id, star }: any) => {
       assertMutationsAllowed("star_message");
       const row = getMessageById(message_id);
@@ -78,6 +84,7 @@ export function registerChatTools(server: McpServer): void {
       block: z.boolean().default(true).describe("true=block, false=unblock"),
       confirm_token: z.string().optional().describe("Token from a prior staged block, to confirm it"),
     },
+    { ...DESTRUCTIVE_REMOTE, title: "Block contact" },
     safeHandler(async ({ jid, block, confirm_token }: any) => {
       const target = normalizeRecipient(jid);
       // Unblocking is benign; blocking is destructive -> stage/confirm.
@@ -99,6 +106,7 @@ export function registerChatTools(server: McpServer): void {
   server.tool(
     "set_profile_status",
     { status: z.string().describe("Your new WhatsApp 'about' text") },
+    { ...UPDATE_REMOTE, title: "Set profile status" },
     safeHandler(async ({ status }: any) => {
       assertMutationsAllowed("set_profile_status");
       await setProfileStatus(getSock(), status);
@@ -109,6 +117,7 @@ export function registerChatTools(server: McpServer): void {
   server.tool(
     "set_profile_name",
     { name: z.string().min(1) },
+    { ...UPDATE_REMOTE, title: "Set profile name" },
     safeHandler(async ({ name }: any) => {
       assertMutationsAllowed("set_profile_name");
       await setProfileName(getSock(), name);

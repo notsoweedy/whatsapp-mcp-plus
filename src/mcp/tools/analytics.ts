@@ -8,6 +8,7 @@ import { renderRewindCards } from "../../analytics/rewind.ts";
 import { config } from "../../config.ts";
 import { assertWritablePath } from "../../security.ts";
 import { jsonResult, textResult, safeHandler } from "../format.ts";
+import { READ_LOCAL, WRITE_LOCAL } from "../annotations.ts";
 
 /** Turn a period keyword into an ISO "since" cutoff. */
 function periodToSince(period: string): string | null {
@@ -56,6 +57,7 @@ export function registerAnalyticsTools(server: McpServer): void {
       title: z.string().optional(),
       subtitle: z.string().optional(),
     },
+    { ...WRITE_LOCAL, title: "Wrapped card (SVG)" },
     safeHandler(async ({ period, output_path, title, subtitle }: any) => {
       const stats = computeWrapped(periodToSince(period), 10);
       const svg = renderWrappedSVG(stats, { title, subtitle });
@@ -78,6 +80,7 @@ export function registerAnalyticsTools(server: McpServer): void {
       period: z.enum(["week", "month", "year", "all"]).default("all"),
       limit: z.number().int().positive().max(50).default(20),
     },
+    { ...READ_LOCAL, title: "Top words" },
     safeHandler(async ({ chat_jid, period, limit }: any) => {
       return jsonResult(computeTopWords(chat_jid ?? null, limit, periodToSince(period)));
     }),
@@ -90,6 +93,7 @@ export function registerAnalyticsTools(server: McpServer): void {
       output_dir: z.string().optional().describe("Directory to write the story cards (defaults to <data>/rewind)"),
       subtitle: z.string().optional(),
     },
+    { ...WRITE_LOCAL, title: "WhatsApp Rewind" },
     safeHandler(async ({ period, output_dir, subtitle }: any) => {
       const stats = computeWrapped(periodToSince(period), 10);
       const board = computeResponseLeaderboard(3, 3);
@@ -117,6 +121,7 @@ export function registerAnalyticsTools(server: McpServer): void {
       min_responses: z.number().int().min(1).max(50).default(3).describe("Minimum replies required to rank a chat"),
       limit: z.number().int().positive().max(30).default(10),
     },
+    { ...READ_LOCAL, title: "Response leaderboard" },
     safeHandler(async ({ min_responses, limit }: any) => {
       const board = computeResponseLeaderboard(min_responses, limit);
       const fmt = (e: any, i: number) => {
@@ -142,6 +147,7 @@ export function registerAnalyticsTools(server: McpServer): void {
       format: z.enum(["card", "json"]).default("card").describe("card = shareable text card, json = raw stats"),
       top_n: z.number().int().positive().max(25).default(10),
     },
+    { ...READ_LOCAL, title: "WhatsApp Wrapped" },
     safeHandler(async ({ period, format, top_n }: any) => {
       const stats = computeWrapped(periodToSince(period), top_n);
       if (format === "json") return jsonResult({ period, ...stats });
