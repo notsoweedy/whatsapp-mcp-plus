@@ -2,10 +2,13 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getSock } from "../../whatsapp/connection.ts";
 import { getCachedMessage } from "../../whatsapp/msgcache.ts";
-import { sendText, sendMediaFile, sendVoiceNote } from "../../whatsapp/actions.ts";
+import { sendText, sendMediaFile, sendVoiceNote, sendSticker } from "../../whatsapp/actions.ts";
+import fs from "node:fs";
+import { cachedStickerPath, downloadMessageMedia } from "../../whatsapp/media.ts";
+import { getSentStickers } from "../../db.ts";
 import { guardedSend, scanForInjection } from "../../safety/index.ts";
 import { jsonResult, safeHandler } from "../format.ts";
-import { SEND_REMOTE } from "../annotations.ts";
+import { SEND_REMOTE, READ_LOCAL } from "../annotations.ts";
 
 /** Turn a bare phone number into a WhatsApp user JID; pass JIDs through. */
 export function normalizeRecipient(recipient: string): string {
@@ -86,6 +89,59 @@ export function registerSendTools(server: McpServer): void {
         description: `Send voice note ${file_path} to ${jid}`,
         confirmToken: confirm_token,
         run: () => sendVoiceNote(getSock(), jid, file_path),
+      });
+      return jsonResult(outcome);
+    }),
+  );
+
+  server.tool(
+    "list_stickers",
+    {
+      chat_jid: z.string().optional().describe("Only stickers you've sent in this chat (omit for all chats)"),
+      limit: z.number().int().positive().max(100).default(30),
+      include_received: z.boolean().optional()
+        .describe("Also list stickers others sent you (after your own); you can re-send those too"),
+    },
+    { ...READ_LOCAL, title: "List stickers you've sent" },
+    safeHandler(async ({ chat_jid, limit, include_received }: any) => {
+      const stickers = getSentStickers(chat_jid, limit, !!include_received).map((s) => ({
+        ...s,
+        saved: fs.existsSync(cachedStickerPath(s.key)), // true = can be sent even if WhatsApp's link expired
+      }));
+      return jsonResult({ stickers });
+    }),
+  );
+
+  server.tool(
+    "send_sticker",
+    {
+      recipient: z.string().describe("Phone number or chat JID"),
+      sticker_message_id: z.string().optional()
+        .describe("Re-send the sticker from this existing sticker message (see list_stickers)"),
+      file_path: z.string().optional()
+        .describe("Or: absolute path to a .webp sticker, or an image to convert into one"),
+      confirm_token: z.string().optional(),
+    },
+    { ...SEND_REMOTE, title: "Send sticker" },
+    safeHandler(async ({ recipient, sticker_message_id, file_path, confirm_token }: any) => {
+      if (!!sticker_message_id === !!file_path) {
+        throw new Error("Pass exactly one of sticker_message_id or file_path.");
+      }
+      const jid = normalizeRecipient(recipient);
+      const outcome = await guardedSend({
+        action: "send_sticker",
+        recipient: jid,
+        description: `Send sticker ${sticker_message_id ?? file_path} to ${jid}`,
+        confirmToken: confirm_token,
+        run: async () => {
+          let src = file_path;
+          if (sticker_message_id) {
+            const media = await downloadMessageMedia(getSock(), sticker_message_id);
+            if (media.mediaType !== "sticker") throw new Error(`Message ${sticker_message_id} is not a sticker.`);
+            src = media.path;
+          }
+          return sendSticker(getSock(), jid, src);
+        },
       });
       return jsonResult(outcome);
     }),

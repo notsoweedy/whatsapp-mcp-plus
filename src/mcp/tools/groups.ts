@@ -36,7 +36,7 @@ export function registerGroupTools(server: McpServer): void {
     "create_group",
     {
       subject: z.string().min(1),
-      participants: z.array(z.string()).min(1).describe("Phone numbers or JIDs of initial members"),
+      participants: z.array(z.string()).describe("Phone numbers or JIDs of initial members (may be empty: a group of just you)"),
     },
     { ...SEND_REMOTE, title: "Create group" },
     safeHandler(async ({ subject, participants }: any) => {

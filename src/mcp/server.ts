@@ -1,7 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import type { Logger } from "pino";
 
+import { config } from "../config.ts";
 import { registerReadTools } from "./tools/read.ts";
 import { registerSendTools } from "./tools/send.ts";
 import { registerPrimitiveTools } from "./tools/primitives.ts";
@@ -50,7 +54,7 @@ function withScopeGate(server: McpServer): McpServer {
   return server;
 }
 
-export async function startMcpServer(logger: Logger): Promise<void> {
+function buildServer(): McpServer {
   const server = withScopeGate(new McpServer({
     name: "whatsapp-mcp-plus",
     version: "0.1.0",
@@ -66,8 +70,68 @@ export async function startMcpServer(logger: Logger): Promise<void> {
   registerAdminTools(server);
   registerExtraTools(server);
   registerChatTools(server);
+  return server;
+}
 
+export async function startMcpServer(logger: Logger): Promise<void> {
+  if (config.transport === "http") {
+    await startHttpServer(logger);
+    return;
+  }
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await buildServer().connect(transport);
   logger.info("MCP server connected over stdio; ready.");
+}
+
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
+
+/**
+ * Streamable-HTTP mode: one long-running process owns the WhatsApp connection
+ * and any number of MCP clients (interactive or headless) can attach to it.
+ * Stateless — a fresh McpServer per request, all sharing the global socket/DB.
+ *
+ * Loopback only, and every request must carry the bearer token. Requests with
+ * a non-loopback Host (DNS rebinding) or any Origin header (a browser page)
+ * are refused, so a website can never drive the account.
+ */
+async function startHttpServer(logger: Logger): Promise<void> {
+  const token = config.httpToken;
+  if (!token || token.length < 32) {
+    throw new Error("WAMCP_TRANSPORT=http requires WAMCP_HTTP_TOKEN (at least 32 chars).");
+  }
+  const expected = Buffer.from(`Bearer ${token}`);
+
+  const httpServer = createServer(async (req, res) => {
+    const host = (req.headers.host ?? "").replace(/:\d+$/, "");
+    const auth = Buffer.from(req.headers.authorization ?? "");
+    const authorized = auth.length === expected.length && timingSafeEqual(auth, expected);
+    if (!LOCAL_HOSTS.has(host) || req.headers.origin || !authorized) {
+      res.writeHead(403).end();
+      return;
+    }
+    if (req.url !== "/mcp") {
+      res.writeHead(404).end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405, { Allow: "POST" }).end();
+      return;
+    }
+    const server = buildServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      transport.close().catch(() => {});
+      server.close().catch(() => {});
+    });
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      logger.error({ err }, "MCP HTTP request failed");
+      if (!res.headersSent) res.writeHead(500).end();
+    }
+  });
+
+  await new Promise<void>((resolve) => httpServer.listen(config.httpPort, "127.0.0.1", resolve));
+  logger.info(`MCP server listening on http://127.0.0.1:${config.httpPort}/mcp; ready.`);
 }

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getSock } from "../../whatsapp/connection.ts";
-import { getGroupChats } from "../../db.ts";
+import { getGroupChats, getPollVotes, getRawMessage } from "../../db.ts";
+import { getCachedMessage } from "../../whatsapp/msgcache.ts";
 import { sendLocation, sendPoll, sendContactCard } from "../../whatsapp/actions.ts";
 import { guardedSend } from "../../safety/index.ts";
 import { formatDbChatForJson, jsonResult, safeHandler } from "../format.ts";
@@ -62,6 +63,24 @@ export function registerExtraTools(server: McpServer): void {
         run: () => sendPoll(getSock(), jid, question, options, selectable_count),
       });
       return jsonResult(outcome);
+    }),
+  );
+
+  server.tool(
+    "get_poll_votes",
+    { message_id: z.string().describe("Id of a poll message (e.g. the result of send_poll)") },
+    { ...READ_LOCAL, title: "Get poll votes" },
+    safeHandler(async ({ message_id }: any) => {
+      const poll: any = getCachedMessage(message_id) ?? getRawMessage(message_id);
+      const m = poll?.message ?? {};
+      const p = m.pollCreationMessage ?? m.pollCreationMessageV2 ?? m.pollCreationMessageV3;
+      if (!p) throw new Error(`Message ${message_id} is not a poll I have.`);
+      return jsonResult({
+        question: p.name,
+        options: (p.options ?? []).map((o: any) => o.optionName),
+        multiple_choice: (p.selectableOptionsCount ?? 1) !== 1,
+        votes: getPollVotes(message_id), // voter "me" = you
+      });
     }),
   );
 

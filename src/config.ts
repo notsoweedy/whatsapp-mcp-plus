@@ -74,6 +74,15 @@ export interface Config {
    */
   actionsPerMinute: number;
   /**
+   * "stdio" (default): one client spawns the server. "http": a long-running
+   * process serves any number of clients on 127.0.0.1 (WAMCP_TRANSPORT).
+   */
+  transport: "stdio" | "http";
+  /** Loopback port for http transport (WAMCP_HTTP_PORT). */
+  httpPort: number;
+  /** Bearer token every http request must carry (WAMCP_HTTP_TOKEN). */
+  httpToken: string | null;
+  /**
    * If non-empty, files may only be SENT from these directories. Anti-exfiltration
    * guard: a prompt-injected agent then cannot send e.g. ~/.ssh/id_rsa. Empty = no
    * restriction. Set via WAMCP_SEND_FILE_ROOTS (comma-separated).
@@ -163,6 +172,9 @@ export const config: Config = {
   privacy: envBool("WAMCP_PRIVACY", true),
   maxMediaBytes: Math.max(1, envInt("WAMCP_MAX_MEDIA_MB", 100)) * 1024 * 1024,
   actionsPerMinute: Math.max(1, envInt("WAMCP_ACTIONS_PER_MINUTE", 60)),
+  transport: (process.env.WAMCP_TRANSPORT || "stdio").toLowerCase() === "http" ? "http" : "stdio",
+  httpPort: envInt("WAMCP_HTTP_PORT", 8765),
+  httpToken: process.env.WAMCP_HTTP_TOKEN || null,
   sendFileRoots: (process.env.WAMCP_SEND_FILE_ROOTS || "")
     .split(",").map((s) => s.trim()).filter(Boolean),
   scopes: resolveScopes(),

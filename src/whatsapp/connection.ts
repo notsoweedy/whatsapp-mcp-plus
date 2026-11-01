@@ -16,10 +16,13 @@ import {
   storeChat,
   storeContact,
   encodeRawMessage,
+  getRawMessage,
   runInTransaction,
 } from "../db.ts";
 import { parseMessageForDb } from "./parse.ts";
-import { rememberMessage } from "./msgcache.ts";
+import { getCachedMessage, rememberMessage } from "./msgcache.ts";
+import { rememberSticker } from "./media.ts";
+import { handlePollVote } from "./polls.ts";
 
 export type WhatsAppSocket = WASocket;
 
@@ -80,6 +83,15 @@ export async function startWhatsAppConnection(logger: Logger): Promise<WhatsAppS
     // Pull message history on first login so the analytics tools have data to
     // work with. Without this WhatsApp only sends the contact + chat list.
     syncFullHistory: config.syncFullHistory,
+    // When a recipient device (incl. our own phone, for "message yourself")
+    // can't decrypt a message it sends a retry receipt; Baileys re-encrypts the
+    // original content from here. Without this the phone is stuck on
+    // "Waiting for this message".
+    getMessage: async (key) => {
+      if (!key.id) return undefined;
+      const msg = getCachedMessage(key.id) ?? getRawMessage(key.id);
+      return msg?.message ?? undefined;
+    },
   });
   currentSock = sock;
 
@@ -157,6 +169,7 @@ export async function startWhatsAppConnection(logger: Logger): Promise<WhatsAppS
       if (type === "notify" || type === "append") {
         for (const msg of messages) {
           rememberMessage(msg);
+          if (msg.message?.pollUpdateMessage) handlePollVote(sock, msg);
           const parsed = parseMessageForDb(msg);
           if (parsed) {
             if (config.storeRaw) parsed.raw = encodeRawMessage(msg);
@@ -168,6 +181,8 @@ export async function startWhatsAppConnection(logger: Logger): Promise<WhatsAppS
             if (!msg.key?.fromMe && msg.pushName && senderJid) {
               storeContact({ jid: senderJid, notify: msg.pushName });
             }
+            // Keep a copy of every sticker while its media link is still valid.
+            if (msg.message?.stickerMessage) void rememberSticker(sock, msg);
           }
         }
       }

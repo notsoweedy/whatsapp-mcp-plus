@@ -7,6 +7,7 @@ import { reconstructKey } from "../../whatsapp/parse.ts";
 import {
   reactToMessage,
   deleteMessage,
+  deleteMessageForMe,
   editMessage,
   markRead,
   forwardText,
@@ -67,10 +68,14 @@ export function registerPrimitiveTools(server: McpServer): void {
     "delete_message",
     {
       message_id: z.string().describe("Delete for everyone; only works for your own recent messages"),
+      for_me: z
+        .boolean()
+        .optional()
+        .describe("Delete only from your own devices (\"Delete for me\"), leaving no placeholder"),
       confirm_token: z.string().optional().describe("Token from a prior staged delete, to confirm it"),
     },
     { ...DESTRUCTIVE_REMOTE, title: "Delete message" },
-    safeHandler(async ({ message_id, confirm_token }: any) => {
+    safeHandler(async ({ message_id, for_me, confirm_token }: any) => {
       const row = getMessageById(message_id);
       if (!row) return errorResult(`Unknown message id ${message_id}`);
       if (!row.is_from_me) {
@@ -79,9 +84,12 @@ export function registerPrimitiveTools(server: McpServer): void {
       const key = reconstructKey({ id: row.id, chat_jid: row.chat_jid, is_from_me: true, sender: row.sender });
       const outcome = await guardedMutation({
         action: "delete_message",
-        description: `Delete message ${message_id} for everyone`,
+        description: `Delete message ${message_id} ${for_me ? "for me" : "for everyone"}`,
         confirmToken: confirm_token,
-        run: () => deleteMessage(getSock(), key),
+        run: () =>
+          for_me
+            ? deleteMessageForMe(getSock(), key, Math.floor(new Date(row.timestamp).getTime() / 1000))
+            : deleteMessage(getSock(), key),
       });
       return jsonResult(outcome);
     }),

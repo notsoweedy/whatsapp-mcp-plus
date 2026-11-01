@@ -94,6 +94,16 @@ export function initializeDatabase(): DatabaseSync {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      poll_id TEXT NOT NULL,
+      voter TEXT NOT NULL,
+      options TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      PRIMARY KEY (poll_id, voter)
+    );
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS sent_log (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       ts TEXT NOT NULL,
@@ -297,10 +307,23 @@ export function storeMessage(message: Message): void {
   const db = getDb();
   try {
     storeChat({ jid: message.chat_jid, last_message_time: message.timestamp });
+    // A message can be delivered again (history sync, retries), sometimes without
+    // its original send time, in which case the parser falls back to "now".
+    // Keep the earliest timestamp seen, so a re-delivery never makes an old
+    // message look new (and reorders the conversation), and keep the stored raw
+    // protobuf if the new copy has none.
     _msgInsertStmt ??= db.prepare(`
-      INSERT OR REPLACE INTO messages
+      INSERT INTO messages
         (id, chat_jid, sender, content, timestamp, is_from_me, message_type, media_type, raw)
       VALUES (@id, @chat_jid, @sender, @content, @timestamp, @is_from_me, @message_type, @media_type, @raw)
+      ON CONFLICT (id, chat_jid) DO UPDATE SET
+        sender = COALESCE(excluded.sender, sender),
+        content = excluded.content,
+        timestamp = MIN(timestamp, excluded.timestamp),
+        is_from_me = excluded.is_from_me,
+        message_type = excluded.message_type,
+        media_type = excluded.media_type,
+        raw = COALESCE(excluded.raw, raw)
     `);
     _msgInsertStmt.run({
       id: message.id,
@@ -500,6 +523,77 @@ export function encodeRawMessage(msg: WAMessage): string | null {
   } catch {
     return null;
   }
+}
+
+export interface SentSticker {
+  message_id: string;
+  /** Stable id of the sticker image (its file hash): the same for every copy. */
+  key: string;
+  uses: number;
+  last_used: string;
+  last_chat_jid: string;
+  animated: boolean;
+  /** true if only ever received from others, never sent by the user. */
+  received_only: boolean;
+}
+
+/**
+ * The user's own sticker "library": stickers they have sent, deduplicated by
+ * file hash (the same sticker re-sent has a new message id but the same hash),
+ * most-used first. Optionally limited to one chat. With includeReceived,
+ * stickers others sent the user are added after their own (anyone can re-use a
+ * sticker they've received).
+ */
+export function getSentStickers(chatJid?: string, limit = 30, includeReceived = false): SentSticker[] {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT id, chat_jid, timestamp, raw, is_from_me FROM v_messages
+     WHERE message_type = 'sticker' AND raw IS NOT NULL
+     ${includeReceived ? "" : "AND is_from_me = 1"}
+     ${chatJid ? "AND chat_jid = ?" : ""}
+     ORDER BY timestamp DESC`,
+  ).all(...(chatJid ? [chatJid] : [])) as any[];
+  const byHash = new Map<string, SentSticker>();
+  for (const r of rows) {
+    let st: any;
+    try {
+      st = proto.WebMessageInfo.decode(Buffer.from(r.raw, "base64")).message?.stickerMessage;
+    } catch {
+      continue;
+    }
+    if (!st) continue;
+    const hash = st.fileSha256 ? Buffer.from(st.fileSha256).toString("base64url") : r.id;
+    const seen = byHash.get(hash);
+    if (seen) {
+      if (r.is_from_me) {
+        seen.uses += 1;
+        seen.received_only = false;
+      }
+    } else byHash.set(hash, {
+      message_id: r.id, key: hash, uses: r.is_from_me ? 1 : 0, last_used: r.timestamp,
+      last_chat_jid: r.chat_jid, animated: !!st.isAnimated, received_only: !r.is_from_me,
+    });
+  }
+  // The user's own stickers first (most used), then received ones (most recent).
+  return [...byHash.values()]
+    .sort((a, b) => Number(a.received_only) - Number(b.received_only) || b.uses - a.uses
+      || b.last_used.localeCompare(a.last_used))
+    .slice(0, limit);
+}
+
+/** Record a voter's current selection on a poll (replaces their earlier vote). */
+export function storePollVote(pollId: string, voter: string, options: string[], ts: string): void {
+  getDb().prepare(
+    `INSERT INTO poll_votes (poll_id, voter, options, ts) VALUES (?, ?, ?, ?)
+     ON CONFLICT (poll_id, voter) DO UPDATE SET options = excluded.options, ts = excluded.ts
+     WHERE excluded.ts >= poll_votes.ts`,
+  ).run(pollId, voter, JSON.stringify(options), ts);
+}
+
+/** Current votes on a poll: [{voter, options, ts}]. */
+export function getPollVotes(pollId: string): { voter: string; options: string[]; ts: string }[] {
+  return (getDb().prepare(`SELECT voter, options, ts FROM poll_votes WHERE poll_id = ? ORDER BY ts`)
+    .all(pollId) as any[]).map((r) => ({ voter: r.voter, options: JSON.parse(r.options), ts: r.ts }));
 }
 
 /** Decode a stored raw message back into a Baileys WAMessage, or null. */

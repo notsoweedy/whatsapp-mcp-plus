@@ -11,6 +11,38 @@ import { waCall } from "./guard.ts";
 import { sanitizeFilename } from "../security.ts";
 
 /**
+ * Stickers are kept in data/stickers/, named by their file hash, the moment we
+ * first get them. WhatsApp media links expire, so without this a sticker you
+ * sent months ago could no longer be re-sent. The same sticker sent twice has
+ * the same hash, so it is stored once.
+ */
+export function stickerKey(msg: any): string | null {
+  const sha = msg?.message?.stickerMessage?.fileSha256;
+  return sha ? Buffer.from(sha).toString("base64url") : null;
+}
+
+export function cachedStickerPath(key: string): string {
+  return path.join(config.dataDir, "stickers", `${sanitizeFilename(key)}.webp`);
+}
+
+function cacheSticker(key: string, buffer: Buffer): void {
+  const file = cachedStickerPath(key);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) fs.writeFileSync(file, buffer);
+}
+
+/** Save a newly seen sticker message to the sticker cache (best effort, never throws). */
+export async function rememberSticker(sock: WASocket | null, msg: any): Promise<void> {
+  const key = stickerKey(msg);
+  if (!key || fs.existsSync(cachedStickerPath(key)) || !msg?.key?.id) return;
+  try {
+    await downloadMessageMedia(sock, msg.key.id);
+  } catch (err) {
+    logger.debug({ err, id: msg.key.id }, "could not cache sticker");
+  }
+}
+
+/**
  * Download the media of a (recently seen) message to disk and return the path.
  * Requires the original message to still be in the in-memory cache.
  */
@@ -28,6 +60,11 @@ export async function downloadMessageMedia(
   }
   const mediaType = detectMediaType(msg) ?? "file";
 
+  const key = mediaType === "sticker" ? stickerKey(msg) : null;
+  if (key && fs.existsSync(cachedStickerPath(key))) {
+    return { path: cachedStickerPath(key), mediaType };
+  }
+
   // Anti-DoS: reject oversized media. Fail fast on the sender-declared length
   // before spending bandwidth, then hard-check the actual bytes.
   const mm: any = msg.message ?? {};
@@ -40,12 +77,23 @@ export async function downloadMessageMedia(
     throw new Error(`Media is ~${Math.round(declared / 1048576)}MB, over the ${capMb}MB limit (WAMCP_MAX_MEDIA_MB).`);
   }
 
-  const buffer = (await waCall("download_media", () => downloadMediaMessage(
-    msg,
+  const download = (m: any) => waCall("download_media", () => downloadMediaMessage(
+    m,
     "buffer",
     {},
     { logger: logger as any, reuploadRequest: (sock as any)?.updateMediaMessage },
-  ), 90_000)) as Buffer;
+  ), 90_000) as Promise<Buffer>;
+  let buffer: Buffer;
+  try {
+    buffer = await download(msg);
+  } catch (err: any) {
+    // Baileys only asks the phone to re-upload on 404/410, but expired media
+    // links answer 403. Ask for a fresh copy ourselves and try once more.
+    const status = err?.response?.status ?? err?.status ?? /status code (\d+)/.exec(String(err?.message))?.[1];
+    if (Number(status) !== 403 || !(sock as any)?.updateMediaMessage) throw err;
+    const refreshed = await waCall("download_media", () => (sock as any).updateMediaMessage(msg), 60_000);
+    buffer = await download(refreshed);
+  }
 
   if (buffer.length > config.maxMediaBytes) {
     throw new Error(`Media is ${(buffer.length / 1048576).toFixed(1)}MB, over the ${capMb}MB limit (WAMCP_MAX_MEDIA_MB).`);
@@ -60,6 +108,7 @@ export async function downloadMessageMedia(
   // a crafted id cannot traverse out of the media directory.
   const outPath = path.join(mediaDir, `${sanitizeFilename(messageId)}${extByType[mediaType] ?? ".bin"}`);
   fs.writeFileSync(outPath, buffer);
+  if (key) cacheSticker(key, buffer);
   return { path: outPath, mediaType };
 }
 

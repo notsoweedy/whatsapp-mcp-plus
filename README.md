@@ -120,8 +120,10 @@ Every knob is an env var: `WAMCP_ALLOWLIST_ONLY`, `WAMCP_REQUIRE_CONFIRM`,
 `list_messages` (with date range), `get_last_interaction`, `contact_info`,
 `get_message_context`, `search_messages`
 **Send:** `send_message` (with reply), `send_file`, `send_voice_note`,
-`send_location`, `send_poll`, `send_contact`
-**Message actions:** `react_to_message`, `edit_message`, `delete_message`,
+`send_location`, `send_poll`, `send_contact`, `send_sticker`
+**Stickers / polls:** `list_stickers` (your sticker library, most-used first), `get_poll_votes`
+(votes on your polls, decrypted and stored as they arrive)
+**Message actions:** `react_to_message`, `edit_message`, `delete_message` (for everyone, or `for_me`),
 `mark_read`, `forward_message`, `star_message`
 **Groups:** `group_info`, `create_group`, `group_update_participants`,
 `group_set_subject`, `group_set_description`, `group_invite_link`, `group_leave`
@@ -143,6 +145,23 @@ you reply to fastest / leave on read longest), `top_words`, `chat_stats`
 transcript), runs it through your STT of choice (e.g. whisper). Without it, the
 audio is still downloaded and its path returned.
 
+### Always-on HTTP mode
+
+By default each MCP client spawns its own server over stdio, so only one client
+can use the WhatsApp connection at a time. With `WAMCP_TRANSPORT=http` one
+long-running process (e.g. a launchd job) owns the connection and any number of
+clients, interactive or headless, attach to it:
+
+```sh
+WAMCP_TRANSPORT=http WAMCP_HTTP_TOKEN=$(openssl rand -hex 32) node dist/index.js
+claude mcp add --transport http -s user whatsapp http://127.0.0.1:8765/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+It listens on 127.0.0.1 only, every request must carry the bearer token, and
+requests with a non-loopback `Host` or any `Origin` header (a web page) are
+refused, so a website can't drive the account.
+
 ## Configuration reference
 
 | Env var | Default | Meaning |
@@ -156,6 +175,9 @@ audio is still downloaded and its path returned.
 | `WAMCP_RATE_PER_DAY` | `200` | max sends / day |
 | `WAMCP_TRANSCRIPTION_CMD` | (none) | STT command template with `{input}` |
 | `WAMCP_SEND_FILE_ROOTS` | (none) | restrict which dirs files can be sent from (anti-exfiltration) |
+| `WAMCP_TRANSPORT` | `stdio` | `stdio` \| `http` (see Always-on HTTP mode) |
+| `WAMCP_HTTP_PORT` | `8765` | loopback port for `http` |
+| `WAMCP_HTTP_TOKEN` | (none) | bearer token, required for `http` (≥ 32 chars) |
 
 ## Account safety & Terms of Service
 

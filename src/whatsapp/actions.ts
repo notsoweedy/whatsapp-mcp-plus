@@ -143,6 +143,31 @@ export async function sendVoiceNote(
   return res?.key.id ?? undefined;
 }
 
+/**
+ * Send a sticker. A .webp is sent as-is; any other image is converted to a
+ * 512x512 transparent-padded webp first (what WhatsApp expects for stickers).
+ */
+export async function sendSticker(
+  sock: WASocket | null,
+  jid: string,
+  filePath: string,
+): Promise<string | undefined> {
+  assertSock(sock);
+  assertSendableFile(filePath);
+  let buf = fs.readFileSync(filePath);
+  if (path.extname(filePath).toLowerCase() !== ".webp") {
+    const sharp = (await import("sharp")).default;
+    buf = await sharp(buf)
+      .resize(512, 512, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .webp()
+      .toBuffer();
+  }
+  const res = await waCall("send_sticker", () =>
+    sock.sendMessage(jidNormalizedUser(jid), { sticker: buf }), MEDIA_TIMEOUT);
+  persistSent(res);
+  return res?.key.id ?? undefined;
+}
+
 export async function reactToMessage(
   sock: WASocket | null,
   key: WAMessageKey,
@@ -159,6 +184,26 @@ export async function deleteMessage(sock: WASocket | null, key: WAMessageKey): P
   assertSock(sock);
   if (!key.remoteJid) throw new Error("Message key is missing remoteJid.");
   await waCall("delete_message", () => sock.sendMessage(key.remoteJid!, { delete: key }), SEND_TIMEOUT);
+}
+
+/**
+ * Delete one of your messages only from your own devices ("Delete for me").
+ * Unlike a revoke, this leaves no "You deleted this message" placeholder, so
+ * it suits tidying your own chats (e.g. an assistant's drafts in self-chat).
+ * `timestampSeconds` is the message's own send time.
+ */
+export async function deleteMessageForMe(
+  sock: WASocket | null,
+  key: WAMessageKey,
+  timestampSeconds: number,
+): Promise<void> {
+  assertSock(sock);
+  if (!key.remoteJid) throw new Error("Message key is missing remoteJid.");
+  await waCall(
+    "delete_message",
+    () => sock.chatModify({ deleteForMe: { key, timestamp: timestampSeconds, deleteMedia: true } }, key.remoteJid!),
+    SEND_TIMEOUT,
+  );
 }
 
 export async function editMessage(
